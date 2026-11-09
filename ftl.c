@@ -33,19 +33,19 @@ int gc(); // 前向声明
 
 void init()
 {
-	for (int i = 0; i < TOTAL_BLOCKS; i++)
+	for (int block = 0; block < TOTAL_BLOCKS; block++)
 	{
-		nand[i].valid_count = 0;
-		nand[i].erase_count = 0;
-		for (int j = 0; j < PAGES_PER_BLOCK; j++)
+		nand[block].valid_count = 0;
+		nand[block].erase_count = 0;
+		for (int page = 0; page < PAGES_PER_BLOCK; page++)
 		{
-			nand[i].pages[j].state = FREE;
-			nand[i].pages[j].data = -1;
+			nand[block].pages[page].state = FREE;
+			nand[block].pages[page].data = -1;
 		}
 	}
-	for (int i = 0; i < LOGICAL_PAGES; i++)
+	for (int lba = 0; lba < LOGICAL_PAGES; lba++)
 	{
-		l2p_table[i] = -1;
+		l2p_table[lba] = -1;
 	}
 	printf("V3.0 Init Done. (All bugs fixed)\n");
 }
@@ -56,16 +56,16 @@ int write_data(int lba, int data)
 	int global_page = -1;
 
 	// 1. 寻找空闲页
-	for (int i = 0; i < TOTAL_BLOCKS; i++)
+	for (int block = 0; block < TOTAL_BLOCKS; block++)
 	{
-		for (int j = 0; j < PAGES_PER_BLOCK; j++)
+		for (int page = 0; page < PAGES_PER_BLOCK; page++)
 		{
-			if (nand[i].pages[j].state == FREE)
+			if (nand[block].pages[page].state == FREE)
 			{
-				nand[i].pages[j].state = VALID;
-				nand[i].pages[j].data = data;
-				nand[i].valid_count++;
-				global_page = i * PAGES_PER_BLOCK + j;
+				nand[block].pages[page].state = VALID;
+				nand[block].pages[page].data = data;
+				nand[block].valid_count++;
+				global_page = block * PAGES_PER_BLOCK + page;
 				found = 1;
 				break;
 			}
@@ -100,20 +100,20 @@ int gc()
 	int min_cost = 999999;
 
 	// 1. 磨损均衡打分
-	for (int i = 0; i < TOTAL_BLOCKS; i++)
+	for (int block = 0; block < TOTAL_BLOCKS; block++)
 	{
 		int has_garbage = 0;
-		for (int p = 0; p < PAGES_PER_BLOCK; p++)
-			if (nand[i].pages[p].state == INVALID)
+		for (int page = 0; page < PAGES_PER_BLOCK; page++)
+			if (nand[block].pages[page].state == INVALID)
 				has_garbage = 1;
 
 		if (has_garbage)
 		{
-			int cost = nand[i].valid_count + (nand[i].erase_count * 2);
+			int cost = nand[block].valid_count + (nand[block].erase_count * 2);
 			if (cost < min_cost)
 			{
 				min_cost = cost;
-				victim = i;
+				victim = block;
 			}
 		}
 	}
@@ -126,18 +126,18 @@ int gc()
 	int temp_datas[PAGES_PER_BLOCK];
 	int count = 0;
 
-	for (int p = 0; p < PAGES_PER_BLOCK; p++)
+	for (int page = 0; page < PAGES_PER_BLOCK; page++)
 	{
-		if (nand[victim].pages[p].state == VALID)
+		if (nand[victim].pages[page].state == VALID)
 		{
-			int old_gp = victim * PAGES_PER_BLOCK + p;
+			int old_gp = victim * PAGES_PER_BLOCK + page;
 			int target_lba = -1;
 
-			for (int l = 0; l < LOGICAL_PAGES; l++)
+			for (int lba = 0; lba < LOGICAL_PAGES; lba++)
 			{
-				if (l2p_table[l] == old_gp)
+				if (l2p_table[lba] == old_gp)
 				{
-					target_lba = l;
+					target_lba = lba;
 					break;
 				}
 			}
@@ -145,7 +145,7 @@ int gc()
 			// 【防弹修复 1】：孤儿页拦截。找不到 LBA 的数据直接丢弃，绝不让下标变成 -1
 			if (target_lba != -1)
 			{
-				temp_datas[count] = nand[victim].pages[p].data;
+				temp_datas[count] = nand[victim].pages[page].data;
 				temp_lbas[count] = target_lba;
 				count++;
 			}
@@ -153,27 +153,27 @@ int gc()
 	}
 
 	// 【防弹修复 2】：擦除前必须清空旧映射！否则写回时会被当成旧数据误杀
-	for (int i = 0; i < count; i++)
+	for (int t = 0; t < count; t++)
 	{
-		l2p_table[temp_lbas[i]] = -1;
+		l2p_table[temp_lbas[t]] = -1;
 	}
 
 	// 3. 擦除块
-	for (int p = 0; p < PAGES_PER_BLOCK; p++)
+	for (int page = 0; page < PAGES_PER_BLOCK; page++)
 	{
-		nand[victim].pages[p].state = FREE;
-		nand[victim].pages[p].data = -1;
+		nand[victim].pages[page].state = FREE;
+		nand[victim].pages[page].data = -1;
 	}
 	nand[victim].valid_count = 0;
 	nand[victim].erase_count++;
 
 	// 4. 写回数据
-	for (int i = 0; i < count; i++)
+	for (int t = 0; t < count; t++)
 	{
 		// 【防弹修复 3】：强校验写回结果
-		if (write_data(temp_lbas[i], temp_datas[i]) != 0)
+		if (write_data(temp_lbas[t], temp_datas[t]) != 0)
 		{
-			printf("[ERROR] GC write-back failed for LBA %d!\n", temp_lbas[i]);
+			printf("[ERROR] GC write-back failed for LBA %d!\n", temp_lbas[t]);
 		}
 	}
 	return 0;
@@ -186,13 +186,13 @@ int main()
 
 	printf("--- Start V3.0 Brutal Write Test (1000 iterations) ---\n");
 
-	for (int i = 0; i < 1000; i++)
+	for (int iter = 0; iter < 1000; iter++)
 	{
 		int random_lba = rand() % LOGICAL_PAGES;
 		int retry = 0;
 
 		// 【防弹修复 4】：防死锁重试上限
-		while (write_data(random_lba, i * 10) == -1)
+		while (write_data(random_lba, iter * 10) == -1)
 		{
 			if (gc() == -1 || retry++ > 100)
 			{
@@ -205,25 +205,25 @@ int main()
 	printf("\n--- Test Passed! ---\n");
 	printf("Block Erase Counts (Wear Leveling Check):\n");
 	int total_ec = 0;
-	for (int i = 0; i < TOTAL_BLOCKS; i++)
+	for (int block = 0; block < TOTAL_BLOCKS; block++)
 	{
-		printf("Block %d: EC = %d\n", i, nand[i].erase_count);
-		total_ec += nand[i].erase_count;
+		printf("Block %d: EC = %d\n", block, nand[block].erase_count);
+		total_ec += nand[block].erase_count;
 	}
 	printf("Total EC = %d\n", total_ec);
 
 	printf("\n--- Final Read Verification ---\n");
-	for (int i = 0; i < 5; i++)
+	for (int lba = 0; lba < 5; lba++)
 	{
-		int gp = l2p_table[i];
+		int gp = l2p_table[lba];
 		if (gp == -1)
 		{
-			printf("LBA %d: NO DATA\n", i);
+			printf("LBA %d: NO DATA\n", lba);
 		}
 		else
 		{
 			int b = gp / PAGES_PER_BLOCK, p = gp % PAGES_PER_BLOCK;
-			printf("LBA %d: Data = %d (Block %d, Page %d)\n", i, nand[b].pages[p].data, b, p);
+			printf("LBA %d: Data = %d (Block %d, Page %d)\n", lba, nand[b].pages[p].data, b, p);
 		}
 	}
 
